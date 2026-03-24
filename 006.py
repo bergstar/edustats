@@ -287,15 +287,30 @@ def infer_descriptor_column_count(
     library: dict[str, dict[str, str]],
     workbook_path: Path,
 ) -> int:
-    prefix_count = descriptor_prefix_count(library)
-    first_data_code = prefix_count + 1
+    first_data_code: int | None = None
+
+    for header_value in header_values:
+        if header_value is None:
+            continue
+
+        label = primary_library_label(library.get(str(header_value), {}))
+        if label is None:
+            continue
+        if is_descriptor_label(label):
+            continue
+
+        first_data_code = header_value
+        break
+
+    if first_data_code is None:
+        prefix_count = descriptor_prefix_count(library)
+        if prefix_count == 0:
+            return 0
+        first_data_code = prefix_count + 1
 
     for position, header_value in enumerate(header_values, start=1):
         if header_value == first_data_code:
             return position - 1
-
-    if prefix_count == 0:
-        return 0
 
     raise ValueError(
         f"Could not infer descriptor columns in {workbook_path}: missing first data code {first_data_code}"
