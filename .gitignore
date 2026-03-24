@@ -2,7 +2,7 @@
 input/
 input/
 001_output/
-002_output
+00*_output
 .002-*/
 __pycache__
 
