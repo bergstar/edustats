@@ -187,6 +187,41 @@ def descriptive_columns(base_ws, part_ws) -> int:
     return count
 
 
+def header_height(worksheet) -> int:
+    code_row = find_code_row(worksheet)
+    header_limit = code_row - 1 if code_row is not None else worksheet.max_row
+    tallest_merge = 0
+
+    for cell_range in worksheet.merged_cells.ranges:
+        if cell_range.min_row > header_limit or cell_range.max_row > header_limit:
+            continue
+        tallest_merge = max(tallest_merge, cell_range.max_row - cell_range.min_row + 1)
+
+    if tallest_merge > 0:
+        return tallest_merge
+    if code_row is not None:
+        return header_limit
+    return 0
+
+
+def normalize_header_height(target_ws, source_ws) -> None:
+    target_height = header_height(target_ws)
+    source_height = header_height(source_ws)
+    desired_height = max(target_height, source_height)
+
+    if target_height < desired_height:
+        insert_at = find_code_row(target_ws)
+        if insert_at is None:
+            raise ValueError("Could not find code row in target sheet while aligning headers")
+        target_ws.insert_rows(insert_at, desired_height - target_height)
+
+    if source_height < desired_height:
+        insert_at = find_code_row(source_ws)
+        if insert_at is None:
+            raise ValueError("Could not find code row in source sheet while aligning headers")
+        source_ws.insert_rows(insert_at, desired_height - source_height)
+
+
 def copy_cell(source_cell, target_cell) -> None:
     target_cell.value = source_cell.value
     if source_cell.has_style:
@@ -208,6 +243,7 @@ def copy_column_block(
     source_start_col: int,
     source_end_col: int,
     target_start_col: int,
+    row_offset: int = 0,
 ) -> None:
     column_offset = target_start_col - source_start_col
 
@@ -220,24 +256,35 @@ def copy_column_block(
             target_ws.column_dimensions[target_letter].width = source_ws.column_dimensions[source_letter].width
 
         for row in range(1, source_ws.max_row + 1):
+            target_row = row + row_offset
+            if target_row < 1:
+                continue
             copy_cell(
                 source_ws.cell(row=row, column=source_col),
-                target_ws.cell(row=row, column=target_col),
+                target_ws.cell(row=target_row, column=target_col),
             )
 
     for row_index, dimension in source_ws.row_dimensions.items():
-        if dimension.height is not None and target_ws.row_dimensions[row_index].height is None:
-            target_ws.row_dimensions[row_index].height = dimension.height
+        target_row_index = row_index + row_offset
+        if target_row_index < 1:
+            continue
+        if dimension.height is not None and target_ws.row_dimensions[target_row_index].height is None:
+            target_ws.row_dimensions[target_row_index].height = dimension.height
 
     for cell_range in source_ws.merged_cells.ranges:
         if cell_range.min_col <= source_start_col - 1:
             continue
 
+        shifted_min_row = cell_range.min_row + row_offset
+        shifted_max_row = cell_range.max_row + row_offset
+        if shifted_min_row < 1 or shifted_max_row < 1:
+            continue
+
         shifted_range = CellRange(
             min_col=cell_range.min_col + column_offset,
-            min_row=cell_range.min_row,
+            min_row=shifted_min_row,
             max_col=cell_range.max_col + column_offset,
-            max_row=cell_range.max_row,
+            max_row=shifted_max_row,
         )
         target_ws.merge_cells(str(shifted_range))
 
@@ -266,6 +313,8 @@ def merge_group(source_paths: list[Path], source_dir: Path, target_dir: Path) ->
             source_workbook = load_workbook(source_path)
             try:
                 source_ws = source_workbook.active
+                normalize_header_height(target_ws, source_ws)
+                row_offset = find_code_row(target_ws) - find_code_row(source_ws)
                 descriptive_count = descriptive_columns(target_ws, source_ws)
                 if source_ws.max_column <= descriptive_count:
                     continue
@@ -276,6 +325,7 @@ def merge_group(source_paths: list[Path], source_dir: Path, target_dir: Path) ->
                     descriptive_count + 1,
                     source_ws.max_column,
                     append_start_col,
+                    row_offset,
                 )
                 used_parts += 1
             finally:
