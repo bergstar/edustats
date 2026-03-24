@@ -143,20 +143,24 @@ def descriptive_crc(worksheet) -> int | None:
     if code_row is None:
         return None
 
-    start_row = code_row + 1
-    if worksheet.max_row - start_row + 1 < 3:
-        return None
-
     rows = []
-    end_row = min(worksheet.max_row, start_row + 4)
-    for row in range(start_row, end_row + 1):
+    for row in range(code_row + 1, worksheet.max_row + 1):
         row_values = []
         for column in range(1, 4):
             value = worksheet.cell(row=row, column=column).value
             row_values.append("" if value is None else str(value))
-        rows.append("\t".join(row_values))
 
-    if not rows:
+        if not any(value.strip() for value in row_values):
+            continue
+
+        if clean_label(row_values[0]).startswith("справка"):
+            break
+
+        rows.append("\t".join(row_values))
+        if len(rows) == 5:
+            break
+
+    if len(rows) < 3:
         return None
 
     return zlib.crc32("\n".join(rows).encode("utf-8"))
