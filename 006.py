@@ -29,6 +29,7 @@ OWNERSHIP_CODES = {
 }
 
 DESCRIPTOR_LABEL_PATTERN = re.compile(r"[^а-яa-z0-9]+", re.IGNORECASE)
+ZERO_PAD_FORMAT_PATTERN = re.compile(r"0+")
 
 
 def should_skip(path: Path) -> bool:
@@ -81,6 +82,19 @@ def is_integer_like(value) -> bool:
     if isinstance(value, str):
         return value.strip().isdigit()
     return False
+
+
+def formatted_cell_value(cell):
+    value = cell.value
+    if value is None:
+        return None
+
+    if is_integer_like(value):
+        number_format = (getattr(cell, "number_format", "") or "").split(";", 1)[0].strip()
+        if ZERO_PAD_FORMAT_PATTERN.fullmatch(number_format):
+            return str(int(float(value))).zfill(len(number_format))
+
+    return value
 
 
 def is_running_number_row(values: list[object], scan_width: int) -> bool:
@@ -216,15 +230,16 @@ def read_cleaned_sheet(workbook_path: Path) -> tuple[int, list[int | None], list
         header_values: list[int | None] = []
         data_rows: list[tuple[int, list[object]]] = []
 
-        for row_number, row_values in enumerate(worksheet.iter_rows(values_only=True), start=1):
-            values = list(row_values)
+        for row_number, row_cells in enumerate(worksheet.iter_rows(), start=1):
+            cells = list(row_cells)
+            raw_values = [cell.value for cell in cells]
 
             if number_row is None:
-                if not is_running_number_row(values, scan_width):
+                if not is_running_number_row(raw_values, scan_width):
                     continue
 
                 number_row = row_number
-                for column, value in enumerate(values, start=1):
+                for column, value in enumerate(raw_values, start=1):
                     if is_integer_like(value):
                         header_values.append(int(float(value)))
                         continue
@@ -236,7 +251,7 @@ def read_cleaned_sheet(workbook_path: Path) -> tuple[int, list[int | None], list
                     raise ValueError(f"Non-numeric header value in {workbook_path} at column {column}")
                 continue
 
-            data_rows.append((row_number, values))
+            data_rows.append((row_number, [formatted_cell_value(cell) for cell in cells]))
 
         if number_row is None:
             raise ValueError(f"Could not find running number row in {workbook_path}")
